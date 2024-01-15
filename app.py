@@ -1,27 +1,16 @@
 from flask import Flask, abort, request
+import argostranslate.translate
 import whisper
 from tempfile import NamedTemporaryFile
-
+from translate import Translate
+from diarization import metadata_audio_file, embedding_batch, speaker_segmentation, segment_embedding, convert_to_wav
 # Load the Whisper model:
 model = whisper.load_model('medium')
-
-import argostranslate.package
-import argostranslate.translate
 
 from_code = "hi"
 to_code = "en"
 
-# Download and install Argos Translate package
-argostranslate.package.update_package_index()
-available_packages = argostranslate.package.get_available_packages()
-package_to_install = next(
-    filter(
-        lambda x: x.from_code == from_code and x.to_code == to_code, available_packages
-    )
-)
-argostranslate.package.install_from_path(package_to_install.download())
-
-
+Translate(from_code, to_code)
 
 
 
@@ -46,13 +35,24 @@ def handler():
         handle.save(temp)
         # Let's get the transcript of the temporary file.
         result = model.transcribe(temp.name)
+        
         # Translate
         translatedText = argostranslate.translate.translate(result['text'], from_code, to_code)
+        
+        # Diarization Steps
+        segments = result["segments"]
+        path = convert_to_wav(temp.name)
+        frames, rate, duration = metadata_audio_file(path)
+        embeddings = embedding_batch(segments,duration, path)
+        segments , speaker_separation  = speaker_segmentation(embeddings, segments)
+        
         # Now we can store the result object for this file.
         results.append({
             'filename': filename,
             'transcript': result['text'],
-            'translatedText': translatedText
+            'translatedText': translatedText,
+            "speaker_1": speaker_separation["speaker_1"], 
+            "speaker_2": speaker_separation["speaker_2"]
         })
 
     # This will be automatically converted to JSON.
@@ -60,4 +60,4 @@ def handler():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, threaded=True, port=5001)
+    app.run(host='0.0.0.0', debug=True, threaded=True, port=5002)
